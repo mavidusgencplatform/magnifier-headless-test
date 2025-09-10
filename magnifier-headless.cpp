@@ -2,7 +2,7 @@
 // @id              magnifier-headless
 // @name            Magnifier Headless Mode
 // @description     Blocks the Magnifier window creation, keeping zoom functionality with win+"-" and win+"+" keyboard shortcuts.
-// @version         0.5.0
+// @version         0.6.0
 // @author          BCRTVKCS
 // @github          https://github.com/bcrtvkcs
 // @twitter         https://x.com/bcrtvkcs
@@ -61,15 +61,21 @@ BOOL WINAPI SetWindowPos_Hook(HWND hWnd, HWND hWndInsertAfter, int X, int Y, int
     return SetWindowPos_Original(hWnd, hWndInsertAfter, X, Y, cx, cy, uFlags);
 }
 
-// SetWindowLongPtrW hook to catch attempts to make the window visible by changing its style.
+// SetWindowLongPtrW hook to catch attempts to make the window visible or add it to the taskbar.
 using SetWindowLongPtrW_t = decltype(&SetWindowLongPtrW);
 SetWindowLongPtrW_t SetWindowLongPtrW_Original;
 LONG_PTR WINAPI SetWindowLongPtrW_Hook(HWND hWnd, int nIndex, LONG_PTR dwNewLong) {
     if (IsMagnifierWindow(hWnd)) {
+        // When changing the standard window style, ensure WS_VISIBLE is removed.
         if (nIndex == GWL_STYLE) {
-            // If the new style has WS_VISIBLE, remove it.
             if (dwNewLong & WS_VISIBLE) {
                 dwNewLong &= ~WS_VISIBLE;
+            }
+        }
+        // When changing the extended window style, ensure WS_EX_APPWINDOW is removed.
+        if (nIndex == GWL_EXSTYLE) {
+            if (dwNewLong & WS_EX_APPWINDOW) {
+                dwNewLong &= ~WS_EX_APPWINDOW;
             }
         }
     }
@@ -105,9 +111,10 @@ HWND WINAPI CreateWindowExW_Hook(
         }
     }
 
-    // If it is a Magnifier window, create it initially hidden.
+    // If it is a Magnifier window, create it initially hidden and without the taskbar icon.
     if (isMagnifierClass) {
         dwStyle &= ~WS_VISIBLE;
+        dwExStyle &= ~WS_EX_APPWINDOW;
     }
 
     HWND hwnd = CreateWindowExW_Original(
