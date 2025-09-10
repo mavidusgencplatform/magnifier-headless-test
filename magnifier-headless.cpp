@@ -2,7 +2,7 @@
 // @id              magnifier-headless
 // @name            Magnifier Headless Mode
 // @description     Blocks the Magnifier window creation, keeping zoom functionality with win+"-" and win+"+" keyboard shortcuts.
-// @version         0.4.0
+// @version         0.5.0
 // @author          BCRTVKCS
 // @github          https://github.com/bcrtvkcs
 // @twitter         https://x.com/bcrtvkcs
@@ -59,6 +59,21 @@ BOOL WINAPI SetWindowPos_Hook(HWND hWnd, HWND hWndInsertAfter, int X, int Y, int
     }
 
     return SetWindowPos_Original(hWnd, hWndInsertAfter, X, Y, cx, cy, uFlags);
+}
+
+// SetWindowLongPtrW hook to catch attempts to make the window visible by changing its style.
+using SetWindowLongPtrW_t = decltype(&SetWindowLongPtrW);
+SetWindowLongPtrW_t SetWindowLongPtrW_Original;
+LONG_PTR WINAPI SetWindowLongPtrW_Hook(HWND hWnd, int nIndex, LONG_PTR dwNewLong) {
+    if (IsMagnifierWindow(hWnd)) {
+        if (nIndex == GWL_STYLE) {
+            // If the new style has WS_VISIBLE, remove it.
+            if (dwNewLong & WS_VISIBLE) {
+                dwNewLong &= ~WS_VISIBLE;
+            }
+        }
+    }
+    return SetWindowLongPtrW_Original(hWnd, nIndex, dwNewLong);
 }
 
 // CreateWindowExW hook to catch Magnifier window creation.
@@ -146,6 +161,15 @@ BOOL Wh_ModBeforeSymbolLoading() {
         (void*)SetWindowPos_Hook,
         (void**)&SetWindowPos_Original)) {
         Wh_Log(L"Failed to hook SetWindowPos");
+        return FALSE;
+    }
+
+    // Hook SetWindowLongPtrW to prevent style changes from making the window visible.
+    if (!Wh_SetFunctionHook(
+        (void*)GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetWindowLongPtrW"),
+        (void*)SetWindowLongPtrW_Hook,
+        (void**)&SetWindowLongPtrW_Original)) {
+        Wh_Log(L"Failed to hook SetWindowLongPtrW");
         return FALSE;
     }
 
