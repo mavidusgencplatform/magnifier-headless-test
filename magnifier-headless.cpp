@@ -12,6 +12,7 @@
 
 #include <windows.h>
 #include <windhawk_api.h>
+#include <stdio.h>
 
 // Helper to get window class name for logging
 void GetAndLogClassName(HWND hWnd, WCHAR* buffer, size_t bufferSize) {
