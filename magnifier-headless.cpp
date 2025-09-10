@@ -2,7 +2,7 @@
 // @id              magnifier-headless
 // @name            Magnifier Headless Mode
 // @description     Blocks the Magnifier window creation, keeping zoom functionality with win+"-" and win+"+" keyboard shortcuts.
-// @version         0.2.0
+// @version         0.2.1
 // @author          BCRTVKCS
 // @github          https://github.com/bcrtvkcs
 // @twitter         https://x.com/bcrtvkcs
@@ -38,10 +38,8 @@ using ShowWindow_t = decltype(&ShowWindow);
 ShowWindow_t ShowWindow_Original;
 BOOL WINAPI ShowWindow_Hook(HWND hWnd, int nCmdShow) {
     // If it's a Magnifier window and the command is to show it, hide it instead.
-    if (IsMagnifierWindow(hWnd)) {
-        if (nCmdShow != SW_HIDE && nCmdShow != SW_MINIMIZE && nCmdShow != SW_FORCEMINIMIZE) {
-            return ShowWindow_Original(hWnd, SW_HIDE);
-        }
+    if (IsMagnifierWindow(hWnd) && nCmdShow != SW_HIDE) {
+        return ShowWindow_Original(hWnd, SW_HIDE);
     }
 
     return ShowWindow_Original(hWnd, nCmdShow);
@@ -113,16 +111,10 @@ BOOL Wh_ModInit() {
 
 // Mod uninitialization
 void Wh_ModUninit() {
-    // When the mod is unloaded, restore the Magnifier window.
-    HWND hwnd = FindWindowW(L"MagUIClass", NULL);
-    if (hwnd) {
-        ShowWindow(hwnd, SW_RESTORE);
-    }
-
-    hwnd = FindWindowW(L"ScreenMagnifierUIWnd", NULL);
-    if (hwnd) {
-        ShowWindow(hwnd, SW_RESTORE);
-    }
+    // By default, Windhawk automatically unhooks functions when the mod is unloaded.
+    // We don't need to restore the window's visibility here, as that would
+    // defeat the purpose of the mod if the process restarts or the mod is reloaded.
+    // The user can re-enable the window by disabling the mod in the Windhawk UI.
 }
 
 // Set up hooks before symbol loading.
