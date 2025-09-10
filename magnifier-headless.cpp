@@ -2,7 +2,7 @@
 // @id              magnifier-headless
 // @name            Magnifier Headless Mode
 // @description     Blocks the Magnifier window creation, keeping zoom functionality with win+"-" and win+"+" keyboard shortcuts.
-// @version         0.2.1
+// @version         0.4.0
 // @author          BCRTVKCS
 // @github          https://github.com/bcrtvkcs
 // @twitter         https://x.com/bcrtvkcs
@@ -18,6 +18,7 @@ Blocks the Magnifier window creation, keeping zoom functionality with win+"-" an
 
 #include <windows.h>
 #include <windhawk_api.h>
+
 
 // Function to check if a window is the Magnifier window by its class name.
 BOOL IsMagnifierWindow(HWND hwnd) {
@@ -43,6 +44,21 @@ BOOL WINAPI ShowWindow_Hook(HWND hWnd, int nCmdShow) {
     }
 
     return ShowWindow_Original(hWnd, nCmdShow);
+}
+
+// SetWindowPos hook to catch attempts to show the Magnifier window via position changes.
+using SetWindowPos_t = decltype(&SetWindowPos);
+SetWindowPos_t SetWindowPos_Original;
+BOOL WINAPI SetWindowPos_Hook(HWND hWnd, HWND hWndInsertAfter, int X, int Y, int cx, int cy, UINT uFlags) {
+    // If it's a Magnifier window and the command is to show it, hide it instead.
+    if (IsMagnifierWindow(hWnd)) {
+        if (uFlags & SWP_SHOWWINDOW) {
+            uFlags &= ~SWP_SHOWWINDOW;
+            uFlags |= SWP_HIDEWINDOW;
+        }
+    }
+
+    return SetWindowPos_Original(hWnd, hWndInsertAfter, X, Y, cx, cy, uFlags);
 }
 
 // CreateWindowExW hook to catch Magnifier window creation.
@@ -111,10 +127,6 @@ BOOL Wh_ModInit() {
 
 // Mod uninitialization
 void Wh_ModUninit() {
-    // By default, Windhawk automatically unhooks functions when the mod is unloaded.
-    // We don't need to restore the window's visibility here, as that would
-    // defeat the purpose of the mod if the process restarts or the mod is reloaded.
-    // The user can re-enable the window by disabling the mod in the Windhawk UI.
 }
 
 // Set up hooks before symbol loading.
@@ -125,6 +137,15 @@ BOOL Wh_ModBeforeSymbolLoading() {
         (void*)ShowWindow_Hook,
         (void**)&ShowWindow_Original)) {
         Wh_Log(L"Failed to hook ShowWindow");
+        return FALSE;
+    }
+
+    // Hook SetWindowPos as it can also be used to show windows.
+    if (!Wh_SetFunctionHook(
+        (void*)GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetWindowPos"),
+        (void*)SetWindowPos_Hook,
+        (void**)&SetWindowPos_Original)) {
+        Wh_Log(L"Failed to hook SetWindowPos");
         return FALSE;
     }
 
