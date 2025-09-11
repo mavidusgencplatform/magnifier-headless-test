@@ -2,7 +2,7 @@
 // @id              magnifier-headless
 // @name            Magnifier Headless Mode
 // @description     Blocks the Magnifier window creation, keeping zoom functionality with win+"-" and win+"+" keyboard shortcuts.
-// @version         1.1.0
+// @version         1.2.0
 // @author          BCRTVKCS
 // @github          https://github.com/bcrtvkcs
 // @twitter         https://x.com/bcrtvkcs
@@ -21,6 +21,9 @@ This is achieved by hooking several Windows API functions (`CreateWindowExW`, `S
 
 #include <windows.h>
 #include <windhawk_api.h>
+
+// Global handle to our hidden host window.
+HWND g_hHostWnd = NULL;
 
 // Function to check if a window is the Magnifier window by its class name.
 BOOL IsMagnifierWindow(HWND hwnd) {
@@ -80,31 +83,64 @@ HWND WINAPI CreateWindowExW_Hook(
     int X, int Y, int nWidth, int nHeight, HWND hWndParent, HMENU hMenu,
     HINSTANCE hInstance, LPVOID lpParam) {
 
+    BOOL isMagnifierClass = FALSE;
     if (((ULONG_PTR)lpClassName & ~(ULONG_PTR)0xffff) != 0) {
         if (wcscmp(lpClassName, L"MagUIClass") == 0 ||
             wcscmp(lpClassName, L"ScreenMagnifierUIWnd") == 0) {
+            isMagnifierClass = TRUE;
             // Proactively remove styles that would make the window visible or show it in the taskbar.
             dwStyle &= ~WS_VISIBLE;
             dwExStyle &= ~WS_EX_APPWINDOW;
         }
     }
 
-    return CreateWindowExW_Original(dwExStyle, lpClassName, lpWindowName, dwStyle, X, Y,
+    HWND hwnd = CreateWindowExW_Original(dwExStyle, lpClassName, lpWindowName, dwStyle, X, Y,
                                   nWidth, nHeight, hWndParent, hMenu, hInstance, lpParam);
+
+    // If the created window is the Magnifier UI, immediately re-parent it to our hidden host window.
+    if (hwnd && isMagnifierClass) {
+        Wh_Log(L"Magnifier Headless: Detected Magnifier window creation (HWND: 0x%p). Re-parenting...", hwnd);
+        SetParent(hwnd, g_hHostWnd);
+        // Also ensure it's explicitly hidden.
+        ShowWindow(hwnd, SW_HIDE);
+    }
+
+    return hwnd;
 }
 
 
 // --- MOD INITIALIZATION ---
 
 BOOL Wh_ModInit() {
-    Wh_Log(L"Magnifier Headless: Initializing and setting hooks...");
+    Wh_Log(L"Magnifier Headless: Initializing...");
 
-    // Set up all hooks within Wh_ModInit, the correct entry point.
+    // 1. Create a hidden window to act as a parent "jail" for the Magnifier UI.
+    WNDCLASSW wc = {};
+    wc.lpfnWndProc = DefWindowProcW;
+    wc.lpszClassName = L"MagnifierHeadlessHost";
+    wc.hInstance = GetModuleHandle(NULL);
+    RegisterClassW(&wc);
+
+    g_hHostWnd = CreateWindowExW(
+        0, wc.lpszClassName, L"Magnifier Headless Host", 0,
+        0, 0, 0, 0, HWND_MESSAGE, NULL, wc.hInstance, NULL
+    );
+
+    if (!g_hHostWnd) {
+        Wh_Log(L"Magnifier Headless: Failed to create host window.");
+        return FALSE;
+    }
+
+    Wh_Log(L"Magnifier Headless: Host window created.");
+
+    // 2. Set up all hooks within Wh_ModInit.
     if (!Wh_SetFunctionHook((void*)CreateWindowExW, (void*)CreateWindowExW_Hook, (void**)&CreateWindowExW_Original) ||
         !Wh_SetFunctionHook((void*)ShowWindow, (void*)ShowWindow_Hook, (void**)&ShowWindow_Original) ||
         !Wh_SetFunctionHook((void*)SetWindowPos, (void*)SetWindowPos_Hook, (void**)&SetWindowPos_Original) ||
         !Wh_SetFunctionHook((void*)SetWindowLongPtrW, (void*)SetWindowLongPtrW_Hook, (void**)&SetWindowLongPtrW_Original)) {
         Wh_Log(L"Magnifier Headless: Failed to set up one or more hooks.");
+        DestroyWindow(g_hHostWnd);
+        g_hHostWnd = NULL;
         return FALSE;
     }
 
@@ -113,5 +149,10 @@ BOOL Wh_ModInit() {
 }
 
 void Wh_ModUninit() {
-    // No action is needed here. Hooks are removed automatically by Windhawk.
+    Wh_Log(L"Magnifier Headless: Uninitializing...");
+    if (g_hHostWnd) {
+        DestroyWindow(g_hHostWnd);
+        g_hHostWnd = NULL;
+    }
+    Wh_Log(L"Magnifier Headless: Host window destroyed.");
 }
